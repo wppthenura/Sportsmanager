@@ -18,6 +18,8 @@ import {
   Sparkles,
   MapPin,
   Clock,
+  Wallet,
+  CalendarPlus,
 } from "lucide-react";
 
 import "./Attendance.css";
@@ -47,6 +49,7 @@ const DAYS = [
 
 const LOCATION_SUGGESTIONS = [
   "Panda Multi Sports Arena - Biyagama",
+  "Panda Multi Sports Arena",
   "Beach Training",
   "Ground Training",
   "Public Ground",
@@ -63,29 +66,34 @@ function fmt(n) {
   return "LKR " + (Number(n) || 0).toLocaleString();
 }
 
-function courtFee(session) {
-  if (session?.hasCourtFee === false) return 0;
+function normalizeSession(session = {}) {
+  const hasCourtFee = session.hasCourtFee !== false;
 
-  const rate = Number(session?.courtRate) || 500;
-  const hours = Number(session?.courtHours) || 3;
-  const courts = Number(session?.courtCount) || 1;
-
-  return rate * hours * courts;
-}
-
-function normalizeSession(session) {
   return {
     ...session,
     type: session.type || "weekly",
     day: session.day || "Saturday",
     date: session.date || "",
     time: session.time || "",
-    location: session.location || "Panda Multi Sports Arena",
-    hasCourtFee: session.hasCourtFee !== false,
-    courtRate: Number(session.courtRate) || 500,  
-    courtHours: Number(session.courtHours) || 3,
-    courtCount: Number(session.courtCount) || 1,
+    location: session.location || "Panda Multi Sports Arena - Biyagama",
+    hasCourtFee,
+    courtRate: hasCourtFee ? Number(session.courtRate) || 500 : 0,
+    courtHours: hasCourtFee ? Number(session.courtHours) || 3 : 0,
+    courtCount: hasCourtFee ? Number(session.courtCount) || 1 : 0,
+    notes: session.notes || "",
   };
+}
+
+function getCourtFee(session) {
+  const s = normalizeSession(session);
+
+  if (!s.hasCourtFee) return 0;
+
+  return (
+    (Number(s.courtRate) || 0) *
+    (Number(s.courtHours) || 0) *
+    (Number(s.courtCount) || 0)
+  );
 }
 
 function emptySessionForm(dateKey) {
@@ -95,14 +103,39 @@ function emptySessionForm(dateKey) {
     day: getDayName(dateKey),
     date: dateKey,
     time: "",
-    location: "Panda Multi Sports Arena",
+    location: "Panda Multi Sports Arena - Biyagama",
+    hasCourtFee: true,
     courtRate: 500,
     courtHours: 3,
     courtCount: 1,
     notes: "",
-    hasCourtFee: true,
   };
 }
+
+function buildSessionSnapshot(session) {
+  const s = normalizeSession(session);
+  const fee = getCourtFee(s);
+
+  return {
+    id: s.id,
+    name: s.name || "",
+    type: s.type || "weekly",
+    day: s.day || "",
+    date: s.date || "",
+    time: s.time || "",
+    location: s.location || "Panda Multi Sports Arena - Biyagama",
+    hasCourtFee: s.hasCourtFee,
+    courtRate: s.hasCourtFee ? Number(s.courtRate) || 0 : 0,
+    courtHours: s.hasCourtFee ? Number(s.courtHours) || 0 : 0,
+    courtCount: s.hasCourtFee ? Number(s.courtCount) || 0 : 0,
+    courtFee: fee,
+    notes: s.notes || "",
+  };
+}
+
+/*───────────────────────────────────────────────────────────
+  Session Manager
+───────────────────────────────────────────────────────────*/
 
 function SessionManager({
   sessions,
@@ -128,10 +161,6 @@ function SessionManager({
     setForm((prev) => {
       const next = { ...prev, [key]: value };
 
-      if (key === "date") {
-        next.day = getDayName(value);
-      }
-
       if (key === "type" && value === "weekly") {
         next.date = "";
         next.day = getDayName(selectedDate);
@@ -139,7 +168,23 @@ function SessionManager({
 
       if (key === "type" && value === "extra") {
         next.date = selectedDate;
-        next.day = getDayName(selectedDate);
+        next.day = "";
+      }
+
+      if (key === "date" && next.type === "extra") {
+        next.day = "";
+      }
+
+      if (key === "hasCourtFee" && value === false) {
+        next.courtRate = 0;
+        next.courtHours = 0;
+        next.courtCount = 0;
+      }
+
+      if (key === "hasCourtFee" && value === true) {
+        next.courtRate = prev.courtRate || 500;
+        next.courtHours = prev.courtHours || 3;
+        next.courtCount = prev.courtCount || 1;
       }
 
       return next;
@@ -158,15 +203,15 @@ function SessionManager({
     setForm({
       name: s.name || "",
       type: s.type || "weekly",
-      day: s.day || getDayName(selectedDate),
-      date: s.date || selectedDate,
+      day: s.type === "weekly" ? s.day || getDayName(selectedDate) : "",
+      date: s.type === "extra" ? s.date || selectedDate : "",
       time: s.time || "",
-      location: s.location || "Panda Multi Sports Arena",
-      courtRate: Number(s.courtRate) || 500,
-      courtHours: Number(s.courtHours) || 3,
-      courtCount: Number(s.courtCount) || 1,
+      location: s.location || "Panda Multi Sports Arena - Biyagama",
+      hasCourtFee: s.hasCourtFee,
+      courtRate: s.hasCourtFee ? Number(s.courtRate) || 500 : 0,
+      courtHours: s.hasCourtFee ? Number(s.courtHours) || 3 : 0,
+      courtCount: s.hasCourtFee ? Number(s.courtCount) || 1 : 0,
       notes: s.notes || "",
-      hasCourtFee: s.hasCourtFee !== false,
     });
   };
 
@@ -175,24 +220,33 @@ function SessionManager({
 
     setSaving(true);
 
+    const hasCourtFee = form.hasCourtFee !== false;
+
     const payload = {
-      ...form,
       name: form.name.trim(),
-      day: form.type === "weekly" ? form.day : "",
-      date: form.type === "extra" ? form.date : "",
-      courtRate: Number(form.courtRate) || 500,
-      courtHours: Number(form.courtHours) || 3,
-      courtCount: Number(form.courtCount) || 1,
+      type: form.type || "weekly",
+      day: form.type === "weekly" ? form.day || "Saturday" : "",
+      date: form.type === "extra" ? form.date || selectedDate : "",
+      time: form.time || "",
+      location: form.location || "Panda Multi Sports Arena - Biyagama",
+      hasCourtFee,
+      courtRate: hasCourtFee ? Number(form.courtRate) || 500 : 0,
+      courtHours: hasCourtFee ? Number(form.courtHours) || 3 : 0,
+      courtCount: hasCourtFee ? Number(form.courtCount) || 1 : 0,
+      notes: form.notes || "",
     };
 
-    if (editingId) {
-      await onUpdate(editingId, payload);
-    } else {
-      await onAdd(payload);
-    }
+    try {
+      if (editingId) {
+        await onUpdate(editingId, payload);
+      } else {
+        await onAdd(payload);
+      }
 
-    setSaving(false);
-    resetForm();
+      resetForm();
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleDelete = async (id) => {
@@ -200,37 +254,40 @@ function SessionManager({
     if (editingId === id) resetForm();
   };
 
-  const renderSession = (s) => {
-    const session = normalizeSession(s);
+  const renderSession = (session) => {
+    const s = normalizeSession(session);
+    const fee = getCourtFee(s);
 
     return (
-      <div key={session.id} className="session-item session-item--rich">
+      <div key={s.id} className="session-item session-item--rich">
         <div className="session-item__info">
-          <span className="session-item__name">{session.name}</span>
+          <span className="session-item__name">{s.name}</span>
 
           <span className="session-item__meta">
-            {session.type === "weekly"
-              ? `${session.day} · Repeats weekly`
-              : `${session.date} · Extra session`}
-            {session.time ? ` · ${session.time}` : ""}
+            {s.type === "weekly"
+              ? `${s.day} · Repeats weekly`
+              : `${s.date} · Extra session`}
+            {s.time ? ` · ${s.time}` : ""}
           </span>
 
           <span className="session-item__meta">
-            {session.location} · {fmt(courtFee(session))}
+            {s.location} · {s.hasCourtFee ? fmt(fee) : "No court fee"}
           </span>
         </div>
 
         <div className="session-item__actions">
           <button
             className="session-edit-btn"
-            onClick={() => startEdit(session)}
+            onClick={() => startEdit(s)}
+            title="Edit session"
           >
             <Edit2 size={13} />
           </button>
 
           <button
             className="session-delete-btn"
-            onClick={() => handleDelete(session.id)}
+            onClick={() => handleDelete(s.id)}
+            title="Remove session"
           >
             <Trash2 size={14} />
           </button>
@@ -249,7 +306,7 @@ function SessionManager({
           <div>
             <h3>Practice Sessions</h3>
             <p className="session-modal__sub">
-              Create weekly repeating sessions or one-day extra practices.
+              Manage weekly repeating sessions and one-day extra practices.
             </p>
           </div>
 
@@ -284,8 +341,7 @@ function SessionManager({
               )}
             </div>
           </div>
-
-          <div className="session-add session-add--panel">
+                    <div className="session-add session-add--panel">
             <div className="session-add__top">
               <p className="session-add__title">
                 {editingId ? "Edit Session" : "Add New Session"}
@@ -301,7 +357,8 @@ function SessionManager({
             <div className="session-type-toggle">
               <button
                 className={
-                  "session-type-btn " + (form.type === "weekly" ? "active" : "")
+                  "session-type-btn " +
+                  (form.type === "weekly" ? "active" : "")
                 }
                 onClick={() => updateField("type", "weekly")}
               >
@@ -310,7 +367,8 @@ function SessionManager({
 
               <button
                 className={
-                  "session-type-btn " + (form.type === "extra" ? "active" : "")
+                  "session-type-btn " +
+                  (form.type === "extra" ? "active" : "")
                 }
                 onClick={() => updateField("type", "extra")}
               >
@@ -362,47 +420,56 @@ function SessionManager({
             />
 
             <datalist id="location-suggestions">
-              {LOCATION_SUGGESTIONS.map((l) => (
-                <option key={l} value={l} />
+              {LOCATION_SUGGESTIONS.map((location) => (
+                <option key={location} value={location} />
               ))}
             </datalist>
 
             <label className="session-check-row">
-  <input
-    type="checkbox"
-    checked={form.hasCourtFee}
-    onChange={(e) => updateField("hasCourtFee", e.target.checked)}
-  />
-  <span>This session has court fee</span>
-</label>
+              <input
+                type="checkbox"
+                checked={form.hasCourtFee}
+                onChange={(e) =>
+                  updateField("hasCourtFee", e.target.checked)
+                }
+              />
+
+              <span>This session has court fee</span>
+            </label>
 
             {form.hasCourtFee && (
-  <div className="session-add__row">
-    <input
-      className="session-input"
-      type="number"
-      placeholder="Rate / hour"
-      value={form.courtRate}
-      onChange={(e) => updateField("courtRate", e.target.value)}
-    />
+              <div className="session-add__row">
+                <input
+                  className="session-input"
+                  type="number"
+                  placeholder="Rate / hour"
+                  value={form.courtRate}
+                  onChange={(e) =>
+                    updateField("courtRate", e.target.value)
+                  }
+                />
 
-    <input
-      className="session-input"
-      type="number"
-      placeholder="Hours"
-      value={form.courtHours}
-      onChange={(e) => updateField("courtHours", e.target.value)}
-    />
+                <input
+                  className="session-input"
+                  type="number"
+                  placeholder="Hours"
+                  value={form.courtHours}
+                  onChange={(e) =>
+                    updateField("courtHours", e.target.value)
+                  }
+                />
 
-    <input
-      className="session-input"
-      type="number"
-      placeholder="Courts"
-      value={form.courtCount}
-      onChange={(e) => updateField("courtCount", e.target.value)}
-    />
-  </div>
-)}
+                <input
+                  className="session-input"
+                  type="number"
+                  placeholder="Courts"
+                  value={form.courtCount}
+                  onChange={(e) =>
+                    updateField("courtCount", e.target.value)
+                  }
+                />
+              </div>
+            )}
 
             <textarea
               className="session-input session-input--area"
@@ -412,9 +479,9 @@ function SessionManager({
             />
 
             <div className="session-fee-preview">
-  <span>{form.hasCourtFee ? "Court Fee" : "No Court Fee"}</span>
-  <strong>{fmt(courtFee(form))}</strong>
-</div>
+              <span>{form.hasCourtFee ? "Court Fee" : "No Court Fee"}</span>
+              <strong>{form.hasCourtFee ? fmt(getCourtFee(form)) : "LKR 0"}</strong>
+            </div>
 
             <button
               className="session-add-btn"
@@ -422,7 +489,11 @@ function SessionManager({
               disabled={saving || !form.name.trim()}
             >
               <Plus size={14} />
-              {saving ? "Saving..." : editingId ? "Update Session" : "Add Session"}
+              {saving
+                ? "Saving..."
+                : editingId
+                ? "Update Session"
+                : "Add Session"}
             </button>
           </div>
         </div>
@@ -431,13 +502,17 @@ function SessionManager({
   );
 }
 
+/*───────────────────────────────────────────────────────────
+  Player Row
+───────────────────────────────────────────────────────────*/
+
 function PlayerRow({ player, status, onMark, index }) {
   const isGirl = player.gender === "girl";
 
   return (
     <div
       className={"att-row att-row--" + (status || "unmarked")}
-      style={{ animationDelay: `${index * 0.05}s` }}
+      style={{ animationDelay: `${index * 0.04}s` }}
     >
       <div className="att-row__player">
         <div className="att-row__avatar">
@@ -491,11 +566,17 @@ function PlayerRow({ player, status, onMark, index }) {
           <span className="status-pill absent">✗ Absent</span>
         )}
 
-        {!status && <span className="status-pill unmarked">— Unmarked</span>}
+        {!status && (
+          <span className="status-pill unmarked">— Unmarked</span>
+        )}
       </div>
     </div>
   );
 }
+
+/*───────────────────────────────────────────────────────────
+  Attendance Page
+───────────────────────────────────────────────────────────*/
 
 export default function Attendance() {
   const navigate = useNavigate();
@@ -525,16 +606,20 @@ export default function Attendance() {
   const availableSessions = useMemo(() => {
     return sessions
       .map(normalizeSession)
-      .filter((s) => {
-        if (s.active === false) return false;
+      .filter((session) => {
+        if (session.active === false) return false;
 
-        if (s.type === "extra") {
-          return s.date === selectedDate;
+        if (session.type === "extra") {
+          return session.date === selectedDate;
         }
 
-        return s.day === selectedDay;
+        return session.day === selectedDay;
       })
-      .sort((a, b) => (a.order || 0) - (b.order || 0));
+      .sort((a, b) => {
+        const orderA = Number(a.order) || 0;
+        const orderB = Number(b.order) || 0;
+        return orderA - orderB;
+      });
   }, [sessions, selectedDate, selectedDay]);
 
   useEffect(() => {
@@ -543,15 +628,22 @@ export default function Attendance() {
       return;
     }
 
-    const stillExists = availableSessions.some((s) => s.id === selectedSession);
+    const currentStillExists = availableSessions.some(
+      (session) => session.id === selectedSession
+    );
 
-    if (!stillExists) {
+    if (!currentStillExists) {
       setSelectedSession(availableSessions[0].id);
     }
   }, [availableSessions, selectedSession]);
 
   const selectedSessionObj =
-    availableSessions.find((s) => s.id === selectedSession) || null;
+    availableSessions.find((session) => session.id === selectedSession) ||
+    null;
+
+  const selectedSessionSnapshot = selectedSessionObj
+    ? buildSessionSnapshot(selectedSessionObj)
+    : null;
 
   const {
     players,
@@ -567,13 +659,14 @@ export default function Attendance() {
 
   const { history } = useAttendanceDates();
 
-  const girls = players.filter((p) => p.gender === "girl");
-  const boys = players.filter((p) => p.gender === "boy");
+  const girls = players.filter((player) => player.gender === "girl");
+  const boys = players.filter((player) => player.gender === "boy");
 
   const total = players.length;
-  const unmarked = total - stats.totalPresent - stats.totalAbsent;
+  const markedCount = stats.totalPresent + stats.totalAbsent;
+  const unmarked = total - markedCount;
 
-  const markedDates = history.map((h) => h.date);
+  const markedDates = history.map((item) => item.date);
 
   useEffect(() => {
     async function loadTravel() {
@@ -614,37 +707,51 @@ export default function Attendance() {
   const handleToMethod = (value) => {
     setToMethod(value);
 
-    const method = TRAVEL_METHODS.find((m) => m.label === value);
-    if (method) setToCost(method.defaultCost);
+    const method = TRAVEL_METHODS.find((item) => item.label === value);
+
+    if (method) {
+      setToCost(method.defaultCost);
+    }
   };
 
   const handleFromMethod = (value) => {
     setFromMethod(value);
 
-    const method = TRAVEL_METHODS.find((m) => m.label === value);
-    if (method) setFromCost(method.defaultCost);
-  };
+    const method = TRAVEL_METHODS.find((item) => item.label === value);
 
-  const handleDateSelect = (d) => {
-    setSelectedDate(d);
-    if (window.innerWidth < 900) setShowCal(false);
+    if (method) {
+      setFromCost(method.defaultCost);
+    }
+  };
+    const handleDateSelect = (date) => {
+    setSelectedDate(date);
+
+    if (window.innerWidth < 900) {
+      setShowCal(false);
+    }
   };
 
   const handleSaveAll = async () => {
-    if (!selectedSession || !selectedSessionObj) return;
+    if (!selectedSession || !selectedSessionSnapshot) return;
 
     setTravelSaving(true);
     setTravelError("");
 
     try {
-      await save(selectedSessionObj);
+      await save(selectedSessionSnapshot);
 
       await saveTravelLog(selectedDate, selectedSession, {
-        sessionName: selectedSessionObj.name,
-        sessionType: selectedSessionObj.type,
-        sessionTime: selectedSessionObj.time,
-        sessionLocation: selectedSessionObj.location,
-        courtFee: courtFee(selectedSessionObj),
+        sessionId: selectedSessionSnapshot.id,
+        sessionName: selectedSessionSnapshot.name,
+        sessionType: selectedSessionSnapshot.type,
+        sessionTime: selectedSessionSnapshot.time,
+        sessionLocation: selectedSessionSnapshot.location,
+
+        hasCourtFee: selectedSessionSnapshot.hasCourtFee,
+        courtRate: selectedSessionSnapshot.courtRate,
+        courtHours: selectedSessionSnapshot.courtHours,
+        courtCount: selectedSessionSnapshot.courtCount,
+        courtFee: selectedSessionSnapshot.courtFee,
 
         toMethod,
         toCost: Number(toCost) || 0,
@@ -669,7 +776,7 @@ export default function Attendance() {
 
           <div className="att-header__title">
             <span className="att-header__badge">PT Badminton Academy</span>
-            <h1>Attendance Register</h1>
+            <h1>Attendance 2.0</h1>
           </div>
 
           <button
@@ -685,7 +792,7 @@ export default function Attendance() {
         <div className="att-sidebar att-sidebar--wide">
           <button
             className="att-cal-toggle"
-            onClick={() => setShowCal((v) => !v)}
+            onClick={() => setShowCal((value) => !value)}
           >
             <CalendarDays size={16} />
             {showCal ? "Hide Calendar" : "Pick Date"}
@@ -702,7 +809,7 @@ export default function Attendance() {
 
           <div className="att-session-box att-session-box--schedule">
             <p className="att-session-box__title">
-              <Settings size={13} /> Sessions for {selectedDay}
+              <CalendarPlus size={13} /> Sessions for {selectedDay}
             </p>
 
             {sessionsLoading ? (
@@ -710,6 +817,7 @@ export default function Attendance() {
             ) : availableSessions.length === 0 ? (
               <div className="att-empty-session">
                 <p>No session scheduled for this date.</p>
+
                 <button
                   className="att-create-session-btn"
                   onClick={() => setShowManager(true)}
@@ -719,59 +827,73 @@ export default function Attendance() {
               </div>
             ) : (
               <div className="att-session-pills">
-                {availableSessions.map((s) => (
-                  <button
-                    key={s.id}
-                    className={
-                      "att-session-pill att-session-pill--rich " +
-                      (selectedSession === s.id ? "active" : "")
-                    }
-                    onClick={() => setSelectedSession(s.id)}
-                  >
-                    <span className="att-session-pill__name">{s.name}</span>
+                {availableSessions.map((session) => {
+                  const snapshot = buildSessionSnapshot(session);
 
-                    <span className="att-session-pill__day">
-                      {s.type === "weekly" ? "Weekly" : "Extra"} ·{" "}
-                      {s.time || "No time set"}
-                    </span>
+                  return (
+                    <button
+                      key={snapshot.id}
+                      className={
+                        "att-session-pill att-session-pill--rich " +
+                        (selectedSession === snapshot.id ? "active" : "")
+                      }
+                      onClick={() => setSelectedSession(snapshot.id)}
+                    >
+                      <span className="att-session-pill__name">
+                        {snapshot.name}
+                      </span>
 
-                    <span className="att-session-pill__day">
-                      {s.location} · {fmt(courtFee(s))}
-                    </span>
-                  </button>
-                ))}
+                      <span className="att-session-pill__day">
+                        {snapshot.type === "weekly" ? "Weekly" : "Extra"} ·{" "}
+                        {snapshot.time || "No time set"}
+                      </span>
+
+                      <span className="att-session-pill__day">
+                        {snapshot.location} ·{" "}
+                        {snapshot.hasCourtFee
+                          ? fmt(snapshot.courtFee)
+                          : "No court fee"}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
 
-          {selectedSessionObj && (
+          {selectedSessionSnapshot && (
             <div className="att-session-detail-card">
               <p className="att-session-box__title">Selected Session</p>
 
-              <h3>{selectedSessionObj.name}</h3>
+              <h3>{selectedSessionSnapshot.name}</h3>
 
               <div className="att-session-detail-grid">
                 <span>
-                  <Clock size={13} /> {selectedSessionObj.time || "No time"}
+                  <Clock size={13} />
+                  {selectedSessionSnapshot.time || "No time"}
                 </span>
 
                 <span>
-                  <MapPin size={13} /> {selectedSessionObj.location}
+                  <MapPin size={13} />
+                  {selectedSessionSnapshot.location}
                 </span>
 
                 <span>
-                  {selectedSessionObj.type === "weekly" ? (
+                  {selectedSessionSnapshot.type === "weekly" ? (
                     <Repeat size={13} />
                   ) : (
                     <Sparkles size={13} />
                   )}
-                  {selectedSessionObj.type === "weekly"
+                  {selectedSessionSnapshot.type === "weekly"
                     ? "Repeats weekly"
                     : "Extra session"}
                 </span>
 
                 <span>
-                  <DollarSignIcon /> {fmt(courtFee(selectedSessionObj))}
+                  <Wallet size={13} />
+                  {selectedSessionSnapshot.hasCourtFee
+                    ? `${fmt(selectedSessionSnapshot.courtFee)} court fee`
+                    : "No court fee"}
                 </span>
               </div>
             </div>
@@ -788,14 +910,14 @@ export default function Attendance() {
               <select
                 className="att-travel-select"
                 value={toMethod}
-                onChange={(e) => handleToMethod(e.target.value)}
+                onChange={(event) => handleToMethod(event.target.value)}
                 disabled={!selectedSession}
               >
                 <option value="">Select method</option>
 
-                {TRAVEL_METHODS.map((m) => (
-                  <option key={m.key} value={m.label}>
-                    {m.emoji} {m.label}
+                {TRAVEL_METHODS.map((method) => (
+                  <option key={method.key} value={method.label}>
+                    {method.emoji} {method.label}
                   </option>
                 ))}
               </select>
@@ -809,7 +931,7 @@ export default function Attendance() {
                   className="att-travel-input"
                   type="number"
                   value={toCost}
-                  onChange={(e) => setToCost(e.target.value)}
+                  onChange={(event) => setToCost(event.target.value)}
                   disabled={!selectedSession}
                   placeholder="0"
                 />
@@ -826,14 +948,14 @@ export default function Attendance() {
               <select
                 className="att-travel-select"
                 value={fromMethod}
-                onChange={(e) => handleFromMethod(e.target.value)}
+                onChange={(event) => handleFromMethod(event.target.value)}
                 disabled={!selectedSession}
               >
                 <option value="">Select method</option>
 
-                {TRAVEL_METHODS.map((m) => (
-                  <option key={m.key} value={m.label}>
-                    {m.emoji} {m.label}
+                {TRAVEL_METHODS.map((method) => (
+                  <option key={method.key} value={method.label}>
+                    {method.emoji} {method.label}
                   </option>
                 ))}
               </select>
@@ -847,7 +969,7 @@ export default function Attendance() {
                   className="att-travel-input"
                   type="number"
                   value={fromCost}
-                  onChange={(e) => setFromCost(e.target.value)}
+                  onChange={(event) => setFromCost(event.target.value)}
                   disabled={!selectedSession}
                   placeholder="0"
                 />
@@ -859,11 +981,14 @@ export default function Attendance() {
         <div className="att-sheet-area">
           <div className="att-sheet-heading att-sheet-heading--wide">
             <div>
-              <h2 className="att-sheet-date">{formatDisplayDate(selectedDate)}</h2>
+              <h2 className="att-sheet-date">
+                {formatDisplayDate(selectedDate)}
+              </h2>
 
-              {selectedSessionObj && (
+              {selectedSessionSnapshot && (
                 <span className="att-sheet-session">
-                  {selectedSessionObj.name} · {selectedSessionObj.time || "No time"}
+                  {selectedSessionSnapshot.name} ·{" "}
+                  {selectedSessionSnapshot.time || "No time"}
                 </span>
               )}
             </div>
@@ -877,13 +1002,17 @@ export default function Attendance() {
 
               <div className="att-stat-item present">
                 <CheckCircle size={16} />
-                <span className="att-stat-item__num">{stats.totalPresent}</span>
+                <span className="att-stat-item__num">
+                  {stats.totalPresent}
+                </span>
                 <span className="att-stat-item__lbl">Present</span>
               </div>
 
               <div className="att-stat-item absent">
                 <XCircle size={16} />
-                <span className="att-stat-item__num">{stats.totalAbsent}</span>
+                <span className="att-stat-item__num">
+                  {stats.totalAbsent}
+                </span>
                 <span className="att-stat-item__lbl">Absent</span>
               </div>
 
@@ -903,21 +1032,24 @@ export default function Attendance() {
 
           {!sessionsLoading && availableSessions.length === 0 && (
             <div className="att-warn">
-              ⚠️ No session exists for this date. Add a weekly or extra session first.
+              ⚠️ No session exists for this date. Add a weekly or extra session
+              first.
             </div>
           )}
 
           {error && <div className="att-error-msg">⚠️ {error}</div>}
-          {travelError && <div className="att-error-msg">⚠️ {travelError}</div>}
+          {travelError && (
+            <div className="att-error-msg">⚠️ {travelError}</div>
+          )}
 
           <div className="att-sheet">
             {loading ? (
               <div className="att-loading">
-                {[...Array(8)].map((_, i) => (
+                {[...Array(8)].map((_, index) => (
                   <div
-                    key={i}
+                    key={index}
                     className="att-skeleton"
-                    style={{ animationDelay: `${i * 0.06}s` }}
+                    style={{ animationDelay: `${index * 0.06}s` }}
                   />
                 ))}
               </div>
@@ -929,13 +1061,13 @@ export default function Attendance() {
                       🏸 Girls — {girls.length} players
                     </div>
 
-                    {girls.map((p, i) => (
+                    {girls.map((player, index) => (
                       <PlayerRow
-                        key={p.id}
-                        player={p}
-                        status={records[p.id] || ""}
+                        key={player.id}
+                        player={player}
+                        status={records[player.id] || ""}
                         onMark={mark}
-                        index={i}
+                        index={index}
                       />
                     ))}
                   </div>
@@ -947,13 +1079,13 @@ export default function Attendance() {
                       🏸 Boys — {boys.length} players
                     </div>
 
-                    {boys.map((p, i) => (
+                    {boys.map((player, index) => (
                       <PlayerRow
-                        key={p.id}
-                        player={p}
-                        status={records[p.id] || ""}
+                        key={player.id}
+                        player={player}
+                        status={records[player.id] || ""}
                         onMark={mark}
-                        index={i + girls.length}
+                        index={index + girls.length}
                       />
                     ))}
                   </div>
@@ -968,12 +1100,16 @@ export default function Attendance() {
         <div className="att-save-bar__inner">
           <p className="att-save-bar__info">
             {saved
-              ? "✅ Attendance and travel saved to Firebase!"
-              : selectedSessionObj
-              ? `${total - unmarked} of ${total} marked · ${
-                  selectedSessionObj.name
-                } · ${fmt(courtFee(selectedSessionObj))}`
-              : `${total - unmarked} of ${total} marked · ${formatDisplayDate(
+              ? "✅ Attendance, session snapshot and travel saved."
+              : selectedSessionSnapshot
+              ? `${markedCount} of ${total} marked · ${
+                  selectedSessionSnapshot.name
+                } · ${
+                  selectedSessionSnapshot.hasCourtFee
+                    ? fmt(selectedSessionSnapshot.courtFee)
+                    : "No court fee"
+                }`
+              : `${markedCount} of ${total} marked · ${formatDisplayDate(
                   selectedDate
                 )}`}
           </p>
@@ -1006,8 +1142,4 @@ export default function Attendance() {
       )}
     </div>
   );
-}
-
-function DollarSignIcon() {
-  return <span style={{ fontWeight: 800, fontSize: "0.75rem" }}>LKR</span>;
 }

@@ -43,8 +43,14 @@ courtCount: data.hasCourtFee === false ? 0 : Number(data.courtCount) || 1,
 }
 
 export async function updateSession(sessionId, fields) {
+  const hasCourtFee = fields.hasCourtFee !== false;
+
   await updateDoc(doc(db, "practice_sessions", sessionId), {
     ...fields,
+    hasCourtFee,
+    courtRate: hasCourtFee ? Number(fields.courtRate) || 500 : 0,
+    courtHours: hasCourtFee ? Number(fields.courtHours) || 3 : 0,
+    courtCount: hasCourtFee ? Number(fields.courtCount) || 1 : 0,
     updatedAt: new Date().toISOString(),
   });
 }
